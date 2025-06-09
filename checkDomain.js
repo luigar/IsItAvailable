@@ -1,28 +1,13 @@
 require('dotenv').config();
 const whois = require('whois-json');
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
 
 const DOMAIN = process.env.DOMAIN;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const CHECK_INTERVAL_MINUTES = parseInt(process.env.CHECK_INTERVAL_MINUTES || '10');
 
-const STATE_FILE = path.resolve(__dirname, 'domain-status.json');
-
-function saveStatus(status) {
-  fs.writeFileSync(STATE_FILE, JSON.stringify({ status, timestamp: Date.now() }));
-}
-
-function loadStatus() {
-  try {
-    const data = fs.readFileSync(STATE_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch {
-    return null;
-  }
-}
+let previousStatus = null;
 
 async function sendTelegramMessage(text) {
   try {
@@ -31,55 +16,46 @@ async function sendTelegramMessage(text) {
       text,
     });
     console.log('[✅] Telegram notification sent successfully.');
-  } catch (err) {
-    console.error('[❌] Telegram notification error:', err.message);
+  } catch (error) {
+    console.error('[⚠️] Telegram send error:', error.response?.data || error.message);
   }
 }
 
 async function checkDomain() {
   try {
     console.log(`[CHECK] Checking domain: ${DOMAIN}`);
-    const rawWhois = await whois(DOMAIN);
+    const data = await whois(DOMAIN);
 
-    // Convert WHOIS object to raw text for regex searching
-    const whoisText = JSON.stringify(rawWhois, null, 2);
+    // Example: check domain availability by presence of certain strings or empty response
+    const rawWhois = JSON.stringify(data);
+    console.log('[WHOIS] Raw WHOIS output:', rawWhois);
 
-    // Determine domain status from WHOIS output
-    let currentStatus = 'taken'; // default
+    const domainIsAvailable =
+      Object.keys(data).length === 0 ||
+      /No match|NOT FOUND|Available|Status: free|pendingDelete/i.test(rawWhois);
 
-    if (/pendingDelete/i.test(whoisText)) {
-      currentStatus = 'pendingDelete';
-    } else if (/No match|NOT FOUND|Domain not found|Status:\s*free/i.test(whoisText)) {
-      currentStatus = 'available';
-    }
-
+    const currentStatus = domainIsAvailable ? 'available' : 'taken';
     console.log(`[WHOIS] Current status: ${currentStatus}`);
 
-    const previous = loadStatus();
-
-    if (!previous) {
-      // First run: save current status but don't notify
-      saveStatus(currentStatus);
+    if (previousStatus === null) {
       console.log('[INIT] Saved initial domain status.');
+      await sendTelegramMessage(`ℹ️ Domain status check started for ${DOMAIN}. Current status: ${currentStatus}`);
+      previousStatus = currentStatus;
       return;
     }
 
-    if (previous.status !== currentStatus) {
-      // Status changed!
-      if (currentStatus === 'pendingDelete') {
-        await sendTelegramMessage(`⚠️ Domain is now in PENDING DELETE status: ${DOMAIN}\nKeep monitoring closely.`);
-      } else if (currentStatus === 'available') {
+    if (previousStatus !== currentStatus) {
+      if (currentStatus === 'available') {
         await sendTelegramMessage(`🚨 Domain AVAILABLE: ${DOMAIN}\nRegister ASAP!`);
-      } else if (currentStatus === 'taken') {
-        await sendTelegramMessage(`ℹ️ Domain is now registered/taken again: ${DOMAIN}`);
+      } else {
+        await sendTelegramMessage(`ℹ️ Domain status changed to TAKEN: ${DOMAIN}`);
       }
-
-      saveStatus(currentStatus);
+      previousStatus = currentStatus;
     } else {
-      console.log('[INFO] No status change detected.');
+      console.log(`[STATUS] No change, domain still ${currentStatus}.`);
     }
   } catch (error) {
-    console.error(`[⚠️] Error occurred: ${error.message}`);
+    console.error(`[⚠️] Error occurred:`, error.message);
   }
 }
 
