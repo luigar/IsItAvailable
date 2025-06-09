@@ -1,5 +1,4 @@
-require('dotenv').config();
-const whois = require('whois-json');
+const { exec } = require('child_process');
 const axios = require('axios');
 
 const DOMAIN = process.env.DOMAIN;
@@ -14,19 +13,25 @@ console.log(`[INIT] Telegram Bot Token (partial): ${TELEGRAM_BOT_TOKEN?.slice(0,
 
 let interval = null;
 
+function rawWhois(domain) {
+  return new Promise((resolve, reject) => {
+    exec(`whois ${domain}`, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(stdout.toString());
+      }
+    });
+  });
+}
+
 async function checkDomain() {
   console.log(`[CHECK] Checking domain: ${DOMAIN}`);
   try {
-    const data = await whois(DOMAIN);
-    console.log(`[WHOIS] Raw WHOIS data:\n`, data);
+    const whoisText = await rawWhois(DOMAIN);
+    console.log(`[WHOIS] Raw WHOIS output:\n${whoisText}`);
 
-    const whoisText = JSON.stringify(data).toLowerCase();
-    const domainIsAvailable =
-      whoisText.includes("no match for") ||
-      whoisText.includes("not found") ||
-      whoisText.includes("no data found") ||
-      whoisText.includes("available") ||
-      whoisText.includes("status: free");
+    const domainIsAvailable = /no match|not found|no data found|available|status: free/i.test(whoisText);
 
     if (domainIsAvailable) {
       const message = `🚨 Domain AVAILABLE: ${DOMAIN}\nRegister ASAP!`;
