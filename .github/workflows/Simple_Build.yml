@@ -1,0 +1,25 @@
+name: Build and Run Domain Checker
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      run: |
+        docker build -t domain-checker .
+
+    - name: Run domain checker container
+      run: |
+        docker run --rm --env-file .env domain-checker
